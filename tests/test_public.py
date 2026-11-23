@@ -43,3 +43,55 @@ def test_ingest_then_ask(client):
     body = r.json()
     assert body["sources"][0]["doc_id"] == "cats"
     assert body["sources"][0]["chunk_id"] == "cats:0"
+
+
+def test_replacement_documents_and_delete(client):
+    first = client.post(
+        "/ingest",
+        json={"documents": [{"id": "b", "text": "One two three four"}]},
+    )
+    assert first.status_code == 200
+
+    client.post(
+        "/ingest",
+        json={
+            "documents": [
+                {"id": "a", "text": "Alpha beta"},
+                {"id": "b", "text": "Replacement"},
+            ]
+        },
+    )
+
+    documents = client.get("/documents")
+    assert documents.status_code == 200
+    assert documents.json() == {
+        "documents": [
+            {"id": "a", "chunks": 1},
+            {"id": "b", "chunks": 1},
+        ]
+    }
+
+    deleted = client.delete("/documents/b")
+    assert deleted.status_code == 204
+    assert deleted.content == b""
+    assert client.get("/documents").json() == {
+        "documents": [{"id": "a", "chunks": 1}]
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"documents": []},
+        {"documents": [{"id": "", "text": "text"}]},
+        {"documents": [{"id": "doc", "text": "   "}]},
+    ],
+)
+def test_ingest_validation(client, payload):
+    assert client.post("/ingest", json=payload).status_code == 422
+
+
+@pytest.mark.parametrize("top_k", [0, 11, "3", True])
+def test_ask_top_k_validation(client, top_k):
+    assert client.post("/ask", json={"question": "question", "top_k": top_k}).status_code == 422
